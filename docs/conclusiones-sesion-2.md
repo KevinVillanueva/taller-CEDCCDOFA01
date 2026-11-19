@@ -10,7 +10,10 @@
 
 ## Parte 1
 
-_(pendiente)_
+1. Cambió un archivo se realizaron 4 inserciones.
+2. De los test pasaron 18 y 1 falló. Fallo el test para: Cubre el último día delturno.
+3. De las 4 pruebas, hay 2 verdes, 1 gris y 1 roja. La que fallo "catalog-service" falla en la prueba "cubre el último día del turno"
+
 
 ## Parte 2
 
