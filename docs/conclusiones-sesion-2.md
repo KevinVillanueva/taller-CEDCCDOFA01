@@ -103,11 +103,20 @@ Tipo de hallazgo más frecuente: **magic**, con 125 de 147 hallazgos (cerca del 
 
 7. Se actualizaron los paquetes, al corren el pytest parsaron 82 sin incidentes.
 
-8.
+8. Se realiza el git push
+
+**Esta respuesta fue dada por claude, yo la revisé y concuerdo con su analisis por lo que la acepté.**
+**Hallazgo más difícil de decidir:** la `NOTIFICATIONS_API_KEY`. Aparece literal en cinco archivos y en el historial de git, así que borrarla del código no basta: habría que sacarla a una variable de entorno y rotarla, y no puedo saber desde fuera si es una clave real o de desarrollo.
+
+**Por qué Go no se arregla con un comando:** el código vulnerable es la biblioteca estándar, que viene con el compilador (go1.23.12), no un paquete de `go.mod`. Hay que subir la versión de Go en el `Dockerfile` y en `go.mod`, reconstruir la imagen y volver a probar.
+
+**Secreto en `tarea/`:** no es real. Es `03-secreto.patch`, un secreto de mentira que se usa en la Parte 5 para probar el gate, y `gitleaks` lo marca porque busca patrones y no distingue entre uno real y uno de prueba.
 
 ## Parte 5
 
-_(pendiente)_
+1. Se copia el workflow y se sube a github.
+
+2. Los nuevos jobs (calidad-y-segurida, construye-imagenes) están en color verde.
 
 ## Parte 6
 
