@@ -118,6 +118,70 @@ Tipo de hallazgo más frecuente: **magic**, con 125 de 147 hallazgos (cerca del 
 
 2. Los nuevos jobs (calidad-y-segurida, construye-imagenes) están en color verde.
 
+3. 
+| Paso del workflow | Comando | Parte | ¿Bloquea? |
+|---|---|---|---|
+| `checkout`, `Instala km`, `setup-node`, `setup-uv`, `setup-go`, `Instala gitleaks` | (instalan las herramientas) | - | - |
+| Nota del código | `km score --trend "$BASE" --fail-if-worse --gate-scope changed` | 3 | Sí, si un archivo tocado empeora su nota |
+| Code smells | `km smells --since-ref "$BASE"` | 3 | No, solo informa |
+| Seguridad de la infraestructura | `km infra smells --since-ref "$BASE" --fail-on hard-coded-secret,empty-password` | 3 | Sí, con secretos literales o contraseñas vacías |
+| Dependencias de catalog | `npm audit --omit=dev --audit-level=high` | 4 (paso 1) | Sí, solo con vulnerabilidades altas o críticas de producción |
+| Dependencias de incidents | `uv export ...` y `pip-audit` | 4 (paso 2) | Sí, con cualquier vulnerabilidad |
+| Dependencias de notifications | `govulncheck ./...` | 4 (paso 3) | **No: lleva `continue-on-error: true`** |
+| Secretos | `gitleaks detect --redact -v --log-opts="$BASE..HEAD"` | 4 (paso 4) | Sí, con secretos en los commits del PR |
+
+el unico paso con continuo-on-error: true es Dependencias de notifications.
+
+4. Se exigen los jobs calidad-y-seguridad y construye-imagenes como requisito del merge.
+
+5. En el compose.yaml se agregó una API KEY del catalogo de manera pública, lo que es un incidente de seguridad.
+
+6. El color de calidad-y-seguirdad es rojo, reporta que hay 6 secretos hard-coded en el código.
+
+7. Se aplica el parche para quitar el secreto, sigue apareciendo rojo falla en "secretos" el warning dice "leaks found: 1"
+
+**Qué bloquea el gate:** notas de código que empeoran en los archivos tocados, secretos literales o contraseñas vacías en la infraestructura tocada, vulnerabilidades altas o críticas de producción en catalog, cualquier vulnerabilidad de incidents, secretos en los commits nuevos del PR y que las tres imágenes no construyan.
+
+**Qué bloquea y qué deja pasar:** bloquea secretos, notas de código peores, vulnerabilidades altas de catalog, cualquiera de incidents y fallos al construir imágenes; deja pasar las moderadas, todo notifications y `km smells`. Se le escaparía un bug de lógica como el del último día del turno, porque no corre pruebas.
+
+**Secretos reportados vs. agregados:** el parche agrega 1, pero el paso reporta 6. No coinciden porque `km infra smells` lee `compose.yaml` completo y cuenta también los 5 que ya existían.
+
+**Próximo que cambie `compose.yaml`:** su PR fallará aunque no agregue secretos, porque hereda los 5 existentes. Hay que sacarlos del archivo.
+
+**Notifications sin bloquear:** es razonable por ahora, porque los hallazgos son de la biblioteca estándar y se arreglan subiendo Go. Debe durar hasta subir la versión de Go (propongo 2026-12-15), y después se quita `continue-on-error`.
+
+**Secreto en el historial:** sí, sigue, porque revertir solo agrega un commit nuevo. Si fuera real, hay que revocarlo y rotarlo, y después reescribir el historial.
+
 ## Parte 6
 
-_(pendiente)_
+1. pager-catalog:latest tamaño 62.9MB
+    pager-incident:latest 62.5MB
+    pager-notification:latest 3.31MB
+    pager-tools:latest 254MB
+
+2. 
+| Requisito | Resultado | Evidencia |
+|---|---|---|
+| Versión fija de la base | **No cumple** | `FROM python:3.12-slim` y `COPY --from=ghcr.io/astral-sh/uv:0.7` usan etiquetas flotantes, sin versión completa ni digest. La imagen resuelve hoy a 3.12.16, pero mañana puede cambiar. |
+| Usuario sin privilegios | **Cumple** | `docker inspect` devuelve `nobody` y el Dockerfile tiene `USER nobody`. |
+| Sin secretos en las capas | **Cumple en `docker history`, con una duda** | No hay `ENV` ni `ARG` con secretos (`GPG_KEY` y `PYTHON_SHA256` son de la imagen base de Python). Pero `COPY src/` copia `config.py`, donde `gitleaks` encontró una clave (línea 10), y `docker history` no muestra el contenido de los archivos. |
+| `.dockerignore` presente | (completar con `Get-ChildItem -Force`) | |
+
+3. Ambas cofiguraciones distintas del puerto me dan status:ok como mensaje.
+
+**Respuesta de `/health`:** ambas, `localhost:9001` (puerto por defecto 8080) y `localhost:9002` (`PORT=9090`), respondieron `status: ok`.
+
+**CI (`construye-imagenes`):** construye las mismas tres imágenes que el paso 1 y salió en verde.
+
+**Diferencia de tamaño:** depende de lo que lleva cada una: puede ser por diferencia de estructura.
+
+**Misma imagen en dos puertos:** era una sola imagen con dos contenedores, y el puerto cambió solo con la variable `PORT`. Importa porque la configuración queda fuera de la imagen: se construye una vez y esa misma imagen probada se despliega en cualquier entorno, sin reconstruirla.
+
+respuesta fiunales: **Esta respuesta fueron construidas en conjunto con IA, se valoraron y se decidió aceptarlas**
+
+1. ¿Qué te dice la distancia entre «las pruebas pasan» y «las pruebas detectan»?
+Que tener todas las pruebas aprobadas no garantiza que no existan errores. Aunque teníamos un 80% de cobertura, había un error que las pruebas no detectaban. Además, sobrevivieron 3 de 4 mutantes, lo que demuestra que todavía existen debilidades en las pruebas.
+2. ¿Cuál control te dio más información y cuál menos?
+Más y menos información: `mutar.sh` fue el que más dio, porque señala qué cambios concretos no detectan las pruebas, algo que la cobertura no dice. `km smells` fue el que menos: de 147 hallazgos, 125 eran números mágicos, en su mayoría ruido, y no mostraba ningún riesgo real.
+3. Si tuvieras una hora más, ¿qué agregarías al pipeline y por qué?
+Agregaría mutación al CI para que falle si bajan los mutantes muertos en los archivos tocados, porque el gate actual no habría detectado el bug del último día. Con el resto del tiempo sacaría los secretos de `compose.yaml`, para que el gate deje de fallar en cada cambio de ese archivo.
